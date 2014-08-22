@@ -233,7 +233,7 @@ void VoxelLayer::updateBounds(double robot_x, double robot_y, double robot_yaw, 
       int count = 0; 
 
       double *topic_utime =  NULL;
-      if(clear_old_){
+      if(max_timeout){
         topic_utime = locations_utime.get_values(obs_set.topic);
       }
     
