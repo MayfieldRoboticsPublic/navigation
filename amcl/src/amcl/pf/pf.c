@@ -53,7 +53,8 @@ pf_t *pf_alloc(int min_samples, int max_samples,
   pf_sample_set_t *set;
   pf_sample_t *sample;
   
-  srand48(time(NULL));
+  // srand48(time(NULL));
+  srand48(5);
 
   pf = calloc(1, sizeof(pf_t));
 

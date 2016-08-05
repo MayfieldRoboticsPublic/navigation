@@ -397,7 +397,8 @@ AmclNode::AmclNode() :
   else{
     //rgb - seed randomly - make sure there is no collision in the color space 
     boost::hash<std::string> str_hash;
-    srand ( static_cast<uint>(str_hash(ros::this_node::getName())));
+    // srand ( static_cast<uint>(str_hash(ros::this_node::getName())));
+    srand(5);
     l_colors_[0] = (rand() % 255) / 255.0; //0.0;
     l_colors_[1] = (rand() % 255) / 255.0;
     l_colors_[2] = (rand() % 255) / 255.0;
@@ -936,6 +937,7 @@ pf_vector_t
 AmclNode::uniformPoseGenerator(void* arg)
 {
   map_t* map = (map_t*)arg;
+  srand(5);
 #if NEW_UNIFORM_SAMPLING
   unsigned int rand_index = drand48() * free_space_indices.size();
   std::pair<int,int> free_point = free_space_indices[rand_index];

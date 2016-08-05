@@ -64,7 +64,8 @@ pf_pdf_gaussian_t *pf_pdf_gaussian_alloc(pf_vector_t x, pf_matrix_t cx)
   // Initialize the random number generator
   //pdf->rng = gsl_rng_alloc(gsl_rng_taus);
   //gsl_rng_set(pdf->rng, ++pf_pdf_seed);
-  srand48(++pf_pdf_seed);
+  // srand48(++pf_pdf_seed);
+  srand48(5);
 
   return pdf;
 }
