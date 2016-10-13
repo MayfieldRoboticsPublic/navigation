@@ -158,6 +158,7 @@ class AmclNode
     void updatePoseFromServer();
     void applyInitialPose();
     void applyInitialHypothesisSet();
+    void initializeLaserModel();
 
     double getYaw(tf::Pose& t);
 
@@ -555,12 +556,20 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
   lambda_short_ = config.laser_lambda_short;
   laser_likelihood_max_dist_ = config.laser_likelihood_max_dist;
 
-  if(config.laser_model_type == "beam")
+  if(config.laser_model_type == "beam" && laser_model_type_ != LASER_MODEL_BEAM){
     laser_model_type_ = LASER_MODEL_BEAM;
-  else if(config.laser_model_type == "likelihood_field")
+    initializeLaserModel(); 
+  }
+  else if(config.laser_model_type == "likelihood_field" && 
+          laser_model_type_ != LASER_MODEL_LIKELIHOOD_FIELD){
     laser_model_type_ = LASER_MODEL_LIKELIHOOD_FIELD;
-  else if(config.laser_model_type == "likelihood_field_prob")
+    initializeLaserModel();
+  }
+  else if(config.laser_model_type == "likelihood_field_prob" && 
+          laser_model_type_ != LASER_MODEL_LIKELIHOOD_FIELD_PROB){
     laser_model_type_ = LASER_MODEL_LIKELIHOOD_FIELD_PROB;
+    initializeLaserModel();
+  }
 
   if(config.odom_model_type == "diff")
     odom_model_type_ = ODOM_MODEL_DIFF;
@@ -620,23 +629,8 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
   delete laser_;
   laser_ = new AMCLLaser(max_beams_, map_);
   ROS_ASSERT(laser_);
-  if(laser_model_type_ == LASER_MODEL_BEAM)
-    laser_->SetModelBeam(z_hit_, z_short_, z_max_, z_rand_,
-                         sigma_hit_, lambda_short_, 0.0);
-  else if(laser_model_type_ == LASER_MODEL_LIKELIHOOD_FIELD_PROB){
-    ROS_INFO("Initializing likelihood field model; this can take some time on large maps...");
-    laser_->SetModelLikelihoodFieldProb(z_hit_, z_rand_, sigma_hit_,
-					laser_likelihood_max_dist_, 
-					do_beamskip_, beam_skip_distance_, 
-					beam_skip_threshold_, beam_skip_error_threshold_);
-    ROS_INFO("Done initializing likelihood field model with probabilities.");
-  }
-  else if(laser_model_type_ == LASER_MODEL_LIKELIHOOD_FIELD){
-    ROS_INFO("Initializing likelihood field model; this can take some time on large maps...");
-    laser_->SetModelLikelihoodField(z_hit_, z_rand_, sigma_hit_,
-                                    laser_likelihood_max_dist_);
-    ROS_INFO("Done initializing likelihood field model.");
-  }
+
+  initializeLaserModel();
 
   odom_frame_id_ = config.odom_frame_id;
   base_frame_id_ = config.base_frame_id;
@@ -652,6 +646,28 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
                                                    this, _1));
 
   initial_pose_sub_ = nh_.subscribe("initialpose", 2, &AmclNode::initialPoseReceived, this);
+}
+
+void AmclNode::initializeLaserModel()
+{
+  // Initialize the laser model upon startup or dynamic reconfigure change
+  if(laser_model_type_ == LASER_MODEL_BEAM)
+    laser_->SetModelBeam(z_hit_, z_short_, z_max_, z_rand_,
+                         sigma_hit_, lambda_short_, 0.0);
+  else if(laser_model_type_ == LASER_MODEL_LIKELIHOOD_FIELD_PROB){
+    ROS_INFO("Initializing likelihood field model; this can take some time on large maps...");
+    laser_->SetModelLikelihoodFieldProb(z_hit_, z_rand_, sigma_hit_,
+          laser_likelihood_max_dist_, 
+          do_beamskip_, beam_skip_distance_, 
+          beam_skip_threshold_, beam_skip_error_threshold_);
+    ROS_INFO("Done initializing likelihood field model with probabilities.");
+  }
+  else if(laser_model_type_ == LASER_MODEL_LIKELIHOOD_FIELD){
+    ROS_INFO("Initializing likelihood field model; this can take some time on large maps...");
+    laser_->SetModelLikelihoodField(z_hit_, z_rand_, sigma_hit_,
+                                    laser_likelihood_max_dist_);
+    ROS_INFO("Done initializing likelihood field model.");
+  }
 }
 
 void AmclNode::savePoseToServer()
@@ -1578,9 +1594,14 @@ AmclNode::handleInitialHypothesisSetMessage(const HypothesisSet &msg)
     {
         try
         {
-            tf_->lookupTransform(base_frame_id_, ros::Time::now(),
-                                 base_frame_id_, msg.header.stamp,
-                                 global_frame_id_, tx_odom);
+          ros::Time now = ros::Time::now();
+          // wait a little for the latest tf to become available
+          tf_->waitForTransform(base_frame_id_, msg.header.stamp,
+                                base_frame_id_, now,
+                                odom_frame_id_, ros::Duration(0.5));
+          tf_->lookupTransform(base_frame_id_, msg.header.stamp,
+                               base_frame_id_, now,
+                               odom_frame_id_, tx_odom);
         }
         catch(tf::TransformException e)
         {
@@ -1607,7 +1628,7 @@ AmclNode::handleInitialHypothesisSetMessage(const HypothesisSet &msg)
     {
         tf::Pose pose_old, pose_new;
         tf::poseMsgToTF(msg.hypotheses[p_i].pose, pose_old);
-        pose_new = tx_odom.inverse() * pose_old;
+        pose_new = pose_old * tx_odom;
 
         pf_vector_t pf_hyp = pf_vector_zero();
         pf_hyp.v[0] = pose_new.getOrigin().x();
@@ -1698,9 +1719,14 @@ AmclNode::handleInitialPoseMessage(const geometry_msgs::PoseWithCovarianceStampe
   {
     try
     {
-      tf_->lookupTransform(base_frame_id_, ros::Time::now(),
-			   base_frame_id_, msg.header.stamp,
-			   global_frame_id_, tx_odom);
+      ros::Time now = ros::Time::now();
+      // wait a little for the latest tf to become available
+      tf_->waitForTransform(base_frame_id_, msg.header.stamp,
+                            base_frame_id_, now,
+                            odom_frame_id_, ros::Duration(0.5));
+      tf_->lookupTransform(base_frame_id_, msg.header.stamp,
+                           base_frame_id_, now,
+                           odom_frame_id_, tx_odom);
     }
     catch(tf::TransformException e)
     {
@@ -1774,13 +1800,18 @@ AmclNode::applyInitialPose()
     if(use_cov_from_params_){
       //override the cov params 
       for(int i=0; i < 3; i++){
-	for(int j=0; j < 3; j++){
-	  initial_pose_hyp_->pf_pose_cov.m[i][j] = 0; 
-	}
+      	for(int j=0; j < 3; j++){
+      	  initial_pose_hyp_->pf_pose_cov.m[i][j] = 0; 
+        }
       }
       initial_pose_hyp_->pf_pose_cov.m[0][0] = std_xx_;
       initial_pose_hyp_->pf_pose_cov.m[1][1] = std_yy_;
       initial_pose_hyp_->pf_pose_cov.m[2][2] = std_tt_;
+    }
+    else{
+      printf("Using std_xx of %.3f, std_yy of %.3f, std_tt of %.3f from initialpose msg", 
+             initial_pose_hyp_->pf_pose_cov.m[0][0], initial_pose_hyp_->pf_pose_cov.m[1][1],
+             initial_pose_hyp_->pf_pose_cov.m[2][2]);
     }
         
     pf_init(pf_, initial_pose_hyp_->pf_pose_mean, initial_pose_hyp_->pf_pose_cov);
