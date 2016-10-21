@@ -98,7 +98,8 @@ AMCLOdom::SetModel( odom_model_t type,
                     double alpha2,
                     double alpha3,
                     double alpha4,
-                    double alpha5 )
+                    double alpha5,
+                    double stuck_prob )
 {
   this->model_type = type;
   this->alpha1 = alpha1;
@@ -106,6 +107,7 @@ AMCLOdom::SetModel( odom_model_t type,
   this->alpha3 = alpha3;
   this->alpha4 = alpha4;
   this->alpha5 = alpha5;
+  this->stuck_prob = stuck_prob;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -120,6 +122,9 @@ bool AMCLOdom::UpdateAction(pf_t *pf, AMCLSensorData *data)
 
   set = pf->sets + pf->current_set;
   pf_vector_t old_pose = pf_vector_sub(ndata->pose, ndata->delta);
+
+  // Leave some of the poses where they are now, in case the robot is stuck
+  int poses_to_leave = (int)(set->sample_count * stuck_prob);
 
   switch( this->model_type )
   {
@@ -140,7 +145,7 @@ bool AMCLOdom::UpdateAction(pf_t *pf, AMCLSensorData *data)
     double strafe_hat_stddev = (alpha1 * (delta_rot*delta_rot) +
                                 alpha5 * (delta_trans*delta_trans));
 
-    for (int i = 0; i < set->sample_count; i++)
+    for (int i = poses_to_leave; i < set->sample_count; i++)
     {
       pf_sample_t* sample = set->samples + i;
 
@@ -199,7 +204,7 @@ bool AMCLOdom::UpdateAction(pf_t *pf, AMCLSensorData *data)
     double std_rot_2 = this->alpha1*delta_rot2_noise*delta_rot2_noise +
       this->alpha2*delta_trans*delta_trans;
 
-    for (int i = 0; i < set->sample_count; i++)
+    for (int i = poses_to_leave; i < set->sample_count; i++)
     {
       pf_sample_t* sample = set->samples + i;
 
@@ -238,7 +243,7 @@ bool AMCLOdom::UpdateAction(pf_t *pf, AMCLSensorData *data)
     double strafe_hat_stddev = sqrt( alpha1 * (delta_rot*delta_rot) +
                                      alpha5 * (delta_trans*delta_trans) );
 
-    for (int i = 0; i < set->sample_count; i++)
+    for (int i = poses_to_leave; i < set->sample_count; i++)
     {
       pf_sample_t* sample = set->samples + i;
 
@@ -287,7 +292,7 @@ bool AMCLOdom::UpdateAction(pf_t *pf, AMCLSensorData *data)
     delta_rot2_noise = std::min(fabs(angle_diff(delta_rot2,0.0)),
                                 fabs(angle_diff(delta_rot2,M_PI)));
 
-    for (int i = 0; i < set->sample_count; i++)
+    for (int i = poses_to_leave; i < set->sample_count; i++)
     {
       pf_sample_t* sample = set->samples + i;
 

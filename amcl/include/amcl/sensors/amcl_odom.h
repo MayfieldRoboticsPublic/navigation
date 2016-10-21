@@ -76,7 +76,8 @@ class AMCLOdom : public AMCLSensor
                          double alpha2,
                          double alpha3,
                          double alpha4,
-                         double alpha5 = 0 );
+                         double alpha5 = 0,
+                         double stuck_prob = 0 );
 
   // Update the filter based on the action model.  Returns true if the filter
   // has been updated.
@@ -90,6 +91,10 @@ class AMCLOdom : public AMCLSensor
 
   // Drift parameters
   private: double alpha1, alpha2, alpha3, alpha4, alpha5;
+
+  // Fraction of particles to leave where they are instead of moving according 
+  // to the odom motion model (in case the robot is actually stuck and the wheels are slipping)
+  private: double stuck_prob;
 };
 
 
