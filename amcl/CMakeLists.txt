@@ -103,6 +103,13 @@ install(DIRECTORY examples/
     DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/examples
 )
 
+## Mark cpp header files for installation
+install(DIRECTORY include/${PROJECT_NAME}/
+        DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+        FILES_MATCHING PATTERN "*.h"
+        PATTERN ".svn" EXCLUDE
+)
+
 ## Configure Tests
 if(CATKIN_ENABLE_TESTING)
   find_package(rostest REQUIRED)
