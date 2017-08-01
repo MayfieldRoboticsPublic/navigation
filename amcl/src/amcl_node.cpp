@@ -194,6 +194,7 @@ class AmclNode
     double resolution;
   
     bool draw_weight_as_height_; 
+    bool normalize_weight_;
 
     message_filters::Subscriber<sensor_msgs::LaserScan>* laser_scan_sub_;
     tf::MessageFilter<sensor_msgs::LaserScan>* laser_scan_filter_;
@@ -241,6 +242,7 @@ class AmclNode
     ros::Publisher pose_pub_;
     ros::Publisher pose_basic_pub_;    
     ros::Publisher particlecloud_pub_;
+    ros::Publisher particlecloud_sensor_likelihood_pub_;
     ros::ServiceServer global_loc_srv_;
     ros::ServiceServer nomotion_update_srv_; //to let amcl update samples without requiring motion
     ros::ServiceServer set_map_srv_;
@@ -353,6 +355,8 @@ AmclNode::AmclNode() :
   private_nh_.param("init_global", init_global_, false);
 
   private_nh_.param("draw_weight_as_height", draw_weight_as_height_, false);
+
+  private_nh_.param("normalize_weight", normalize_weight_, false);
 
   private_nh_.param("use_cov_from_params", use_cov_from_params_, false);
 
@@ -470,6 +474,7 @@ AmclNode::AmclNode() :
   pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("amcl_pose", 2, true);
   pose_basic_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("amcl_basic_pose", 2, true);
   particlecloud_pub_ = nh_.advertise<geometry_msgs::PoseArray>("particlecloud", 2, true);
+  particlecloud_sensor_likelihood_pub_ = nh_.advertise<geometry_msgs::PoseArray>("particlecloud_sensor_likelihood", 2, true);
   global_loc_srv_ = nh_.advertiseService("global_localization", 
 					 &AmclNode::globalLocalizationCallback,
                                          this);
@@ -1236,13 +1241,17 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     // Publish the resulting cloud
     // TODO: set maximum rate for publishing
     if (!m_force_update) {
-      geometry_msgs::PoseArray cloud_msg;
-      cloud_msg.header.stamp = ros::Time::now();
+      geometry_msgs::PoseArray cloud_msg, cloud_msg_sensor_likelihood;
+      cloud_msg.header.stamp = laser_scan->header.stamp;
       cloud_msg.header.frame_id = global_frame_id_;
       cloud_msg.poses.resize(set->sample_count);
 
-      double max_weight = 0;       
-      double z = 0;
+      cloud_msg_sensor_likelihood.header.stamp = laser_scan->header.stamp;
+      cloud_msg_sensor_likelihood.header.frame_id = global_frame_id_;
+      cloud_msg_sensor_likelihood.poses.resize(set->sample_count);
+
+      double max_weight = 0;
+      double z = 0, z_sensor_likelihood = 0;
 
       for(int i=0;i<set->sample_count;i++)
       {
@@ -1250,24 +1259,30 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
           if(max_weight < set->samples[i].weight){
             max_weight = set->samples[i].weight;
           }
-          z = set->samples[i].weight; 
+          z = set->samples[i].weight;
+          z_sensor_likelihood = set->samples[i].sensor_likelihood;
         }
 	
         tf::poseTFToMsg(tf::Pose(tf::createQuaternionFromYaw(set->samples[i].pose.v[2]),
                                  tf::Vector3(set->samples[i].pose.v[0],
                                  set->samples[i].pose.v[1], z)),
                                  cloud_msg.poses[i]);
+        tf::poseTFToMsg(tf::Pose(tf::createQuaternionFromYaw(set->samples[i].pose.v[2]),
+                                 tf::Vector3(set->samples[i].pose.v[0],
+                                 set->samples[i].pose.v[1], z_sensor_likelihood)),
+                                 cloud_msg_sensor_likelihood.poses[i]);
       }
       
       if(draw_weight_as_height_){
-        if(max_weight > 0){
+        if(max_weight > 0 && normalize_weight_){
           for(int i=0;i<set->sample_count;i++){
-            cloud_msg.poses[i].position.z /= max_weight; 
+            cloud_msg.poses[i].position.z /= max_weight;
           }	  
         }
       }
 
       particlecloud_pub_.publish(cloud_msg);
+      particlecloud_sensor_likelihood_pub_.publish(cloud_msg_sensor_likelihood);
     }
   }
 
