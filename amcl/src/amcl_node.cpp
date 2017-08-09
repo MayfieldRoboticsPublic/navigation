@@ -139,6 +139,11 @@ class AmclNode
     static std::vector<std::pair<int,int> > free_space_indices;
 #endif
     // Callbacks
+    bool localizationStartCallback(std_srvs::Empty::Request& req,
+                                   std_srvs::Empty::Response& res);
+    bool localizationStopCallback(std_srvs::Empty::Request& req,
+                                  std_srvs::Empty::Response& res);
+
     bool globalLocalizationCallback(std_srvs::Empty::Request& req,
                                     std_srvs::Empty::Response& res);
     bool nomotionUpdateCallback(std_srvs::Empty::Request& req,
@@ -179,7 +184,7 @@ class AmclNode
     std::string test_frame_id_;
     bool use_map_topic_;
     bool first_map_only_;
-  
+
     bool init_global_;
 
     ros::Duration gui_publish_period;
@@ -192,8 +197,8 @@ class AmclNode
     char* mapdata;
     int sx, sy;
     double resolution;
-  
-    bool draw_weight_as_height_; 
+
+    bool draw_weight_as_height_;
     bool normalize_weight_;
 
     message_filters::Subscriber<sensor_msgs::LaserScan>* laser_scan_sub_;
@@ -234,15 +239,17 @@ class AmclNode
     //time for tolerance on the published transform,
     //basically defines how long a map->odom transform is good for
     ros::Duration transform_tolerance_;
-    bool publish_basic_pose_on_convergence_; 
+    bool publish_basic_pose_on_convergence_;
 
     ros::NodeHandle nh_;
     ros::NodeHandle private_nh_;
     ros::Publisher marker_pub_;
     ros::Publisher pose_pub_;
-    ros::Publisher pose_basic_pub_;    
+    ros::Publisher pose_basic_pub_;
     ros::Publisher particlecloud_pub_;
     ros::Publisher particlecloud_sensor_likelihood_pub_;
+    ros::ServiceServer localization_start_srv_;
+    ros::ServiceServer localization_stop_srv_;
     ros::ServiceServer global_loc_srv_;
     ros::ServiceServer nomotion_update_srv_; //to let amcl update samples without requiring motion
     ros::ServiceServer set_map_srv_;
@@ -254,15 +261,16 @@ class AmclNode
 
     bool first_map_received_;
     bool first_reconfigure_call_;
-    bool draw_laser_points_; 
-    double l_colors_[3]; 
+    bool draw_laser_points_;
+    double l_colors_[3];
 
-    double std_xx_; 
+    double std_xx_;
     double std_yy_;
-    double std_tt_; 
+    double std_tt_;
 
-    bool use_cov_from_params_; 
+    bool use_cov_from_params_;
     bool use_tf_to_update_initial_pose_;
+    bool should_run_;
 
     boost::recursive_mutex configuration_mutex_;
     dynamic_reconfigure::Server<amcl::AMCLConfig> *dsrv_;
@@ -337,6 +345,7 @@ AmclNode::AmclNode() :
         initial_pose_hyp_(NULL),
         first_map_received_(false),
         first_reconfigure_call_(true),
+        should_run_(false),
 	odom_only_(false),
 	new_initial_pose_received_(false)
 {
@@ -381,7 +390,7 @@ AmclNode::AmclNode() :
   private_nh_.param("odom_alpha4", alpha4_, 0.2);
   private_nh_.param("odom_alpha5", alpha5_, 0.2);
   private_nh_.param("stuck_prob", stuck_prob_, 0.0);
-  
+
   private_nh_.param("do_beamskip", do_beamskip_, false);
   private_nh_.param("beam_skip_distance", beam_skip_distance_, 0.5);
   private_nh_.param("beam_skip_threshold", beam_skip_threshold_, 0.3);
@@ -396,20 +405,20 @@ AmclNode::AmclNode() :
   std::vector<double> laser_color;
   private_nh_.getParam("laser_colors", laser_color);
   if(laser_color.size() == 3){
-    //put the laser colors 
-    l_colors_[0] = laser_color[0]; 
-    l_colors_[1] = laser_color[1]; 
-    l_colors_[2] = laser_color[2]; 
+    //put the laser colors
+    l_colors_[0] = laser_color[0];
+    l_colors_[1] = laser_color[1];
+    l_colors_[2] = laser_color[2];
   }
   else{
-    //rgb - seed randomly - make sure there is no collision in the color space 
+    //rgb - seed randomly - make sure there is no collision in the color space
     boost::hash<std::string> str_hash;
     srand ( static_cast<uint>(str_hash(ros::this_node::getName())));
     l_colors_[0] = (rand() % 255) / 255.0; //0.0;
     l_colors_[1] = (rand() % 255) / 255.0;
     l_colors_[2] = (rand() % 255) / 255.0;
   }
-  
+
   private_nh_.param("test_frame_id", test_frame_id_, std::string("test_map"));
   private_nh_.param("laser_z_hit", z_hit_, 0.95);
   private_nh_.param("laser_z_short", z_short_, 0.1);
@@ -449,7 +458,7 @@ AmclNode::AmclNode() :
              tmp_model_type.c_str());
     odom_model_type_ = ODOM_MODEL_DIFF;
   }
-  
+
   private_nh_.param("update_min_d", d_thresh_, 0.2);
   private_nh_.param("update_min_a", a_thresh_, M_PI/6.0);
   private_nh_.param("odom_frame_id", odom_frame_id_, std::string("odom"));
@@ -475,20 +484,23 @@ AmclNode::AmclNode() :
   pose_basic_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("amcl_basic_pose", 2, true);
   particlecloud_pub_ = nh_.advertise<geometry_msgs::PoseArray>("particlecloud", 2, true);
   particlecloud_sensor_likelihood_pub_ = nh_.advertise<geometry_msgs::PoseArray>("particlecloud_sensor_likelihood", 2, true);
-  global_loc_srv_ = nh_.advertiseService("global_localization", 
+  global_loc_srv_ = nh_.advertiseService("global_localization",
 					 &AmclNode::globalLocalizationCallback,
                                          this);
   marker_pub_ = nh_.advertise<visualization_msgs::Marker>("amcl_adjusted_scans",1);
   nomotion_update_srv_= nh_.advertiseService("request_nomotion_update", &AmclNode::nomotionUpdateCallback, this);
   set_map_srv_= nh_.advertiseService("set_map", &AmclNode::setMapCallback, this);
 
+  localization_start_srv_ = nh_.advertiseService("localization_start", &AmclNode::localizationStartCallback, this);
+  localization_stop_srv_ = nh_.advertiseService("localization_stop", &AmclNode::localizationStopCallback, this);
+
   ROS_INFO("Scan Topic : %s", scan_topic_.c_str());
 
   laser_scan_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(nh_, scan_topic_, 100);
-  laser_scan_filter_ = 
-          new tf::MessageFilter<sensor_msgs::LaserScan>(*laser_scan_sub_, 
-                                                        *tf_, 
-                                                        odom_frame_id_, 
+  laser_scan_filter_ =
+          new tf::MessageFilter<sensor_msgs::LaserScan>(*laser_scan_sub_,
+                                                        *tf_,
+                                                        odom_frame_id_,
                                                         100);
   laser_scan_filter_->registerCallback(boost::bind(&AmclNode::laserReceived,
                                                    this, _1));
@@ -509,7 +521,7 @@ AmclNode::AmclNode() :
 
   // 15s timer to warn on lack of receipt of laser scans, #5209
   laser_check_interval_ = ros::Duration(15.0);
-  check_laser_timer_ = nh_.createTimer(laser_check_interval_, 
+  check_laser_timer_ = nh_.createTimer(laser_check_interval_,
                                        boost::bind(&AmclNode::checkLaserReceived, this, _1));
 }
 
@@ -563,14 +575,14 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
 
   if(config.laser_model_type == "beam" && laser_model_type_ != LASER_MODEL_BEAM){
     laser_model_type_ = LASER_MODEL_BEAM;
-    initializeLaserModel(); 
+    initializeLaserModel();
   }
-  else if(config.laser_model_type == "likelihood_field" && 
+  else if(config.laser_model_type == "likelihood_field" &&
           laser_model_type_ != LASER_MODEL_LIKELIHOOD_FIELD){
     laser_model_type_ = LASER_MODEL_LIKELIHOOD_FIELD;
     initializeLaserModel();
   }
-  else if(config.laser_model_type == "likelihood_field_prob" && 
+  else if(config.laser_model_type == "likelihood_field_prob" &&
           laser_model_type_ != LASER_MODEL_LIKELIHOOD_FIELD_PROB){
     laser_model_type_ = LASER_MODEL_LIKELIHOOD_FIELD_PROB;
     initializeLaserModel();
@@ -597,17 +609,17 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
   alpha_fast_ = config.recovery_alpha_fast;
   tf_broadcast_ = config.tf_broadcast;
 
-  do_beamskip_= config.do_beamskip; 
-  beam_skip_distance_ = config.beam_skip_distance; 
-  beam_skip_threshold_ = config.beam_skip_threshold; 
+  do_beamskip_= config.do_beamskip;
+  beam_skip_distance_ = config.beam_skip_distance;
+  beam_skip_threshold_ = config.beam_skip_threshold;
 
   pf_ = pf_alloc(min_particles_, max_particles_,
                  alpha_slow_, alpha_fast_,
                  (pf_init_model_fn_t)AmclNode::uniformPoseGenerator,
                  (void *)map_);
-  
-  pf_err_ = config.kld_err; 
-  pf_z_ = config.kld_z; 
+
+  pf_err_ = config.kld_err;
+  pf_z_ = config.kld_z;
   pf_->pop_err = pf_err_;
   pf_->pop_z = pf_z_;
 
@@ -642,10 +654,10 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
   global_frame_id_ = config.global_frame_id;
 
   delete laser_scan_filter_;
-  laser_scan_filter_ = 
-          new tf::MessageFilter<sensor_msgs::LaserScan>(*laser_scan_sub_, 
-                                                        *tf_, 
-                                                        odom_frame_id_, 
+  laser_scan_filter_ =
+          new tf::MessageFilter<sensor_msgs::LaserScan>(*laser_scan_sub_,
+                                                        *tf_,
+                                                        odom_frame_id_,
                                                         100);
   laser_scan_filter_->registerCallback(boost::bind(&AmclNode::laserReceived,
                                                    this, _1));
@@ -662,8 +674,8 @@ void AmclNode::initializeLaserModel()
   else if(laser_model_type_ == LASER_MODEL_LIKELIHOOD_FIELD_PROB){
     ROS_INFO("Initializing likelihood field model; this can take some time on large maps...");
     laser_->SetModelLikelihoodFieldProb(z_hit_, z_rand_, sigma_hit_,
-          laser_likelihood_max_dist_, 
-          do_beamskip_, beam_skip_distance_, 
+          laser_likelihood_max_dist_,
+          do_beamskip_, beam_skip_distance_,
           beam_skip_threshold_, beam_skip_error_threshold_);
     ROS_INFO("Done initializing likelihood field model with probabilities.");
   }
@@ -689,11 +701,11 @@ void AmclNode::savePoseToServer()
   private_nh_.setParam("initial_pose_x", map_pose.getOrigin().x());
   private_nh_.setParam("initial_pose_y", map_pose.getOrigin().y());
   private_nh_.setParam("initial_pose_a", yaw);
-  private_nh_.setParam("initial_cov_xx", 
+  private_nh_.setParam("initial_cov_xx",
                                   last_published_pose.pose.covariance[6*0+0]);
-  private_nh_.setParam("initial_cov_yy", 
+  private_nh_.setParam("initial_cov_yy",
                                   last_published_pose.pose.covariance[6*1+1]);
-  private_nh_.setParam("initial_cov_aa", 
+  private_nh_.setParam("initial_cov_aa",
                                   last_published_pose.pose.covariance[6*5+5]);
 }
 
@@ -710,7 +722,7 @@ void AmclNode::updatePoseFromServer()
   private_nh_.param("initial_pose_x", tmp_pos, init_pose_[0]);
   if(!std::isnan(tmp_pos))
     init_pose_[0] = tmp_pos;
-  else 
+  else
     ROS_WARN("ignoring NAN in initial pose X position");
   private_nh_.param("initial_pose_y", tmp_pos, init_pose_[1]);
   if(!std::isnan(tmp_pos))
@@ -736,10 +748,10 @@ void AmclNode::updatePoseFromServer()
   if(!std::isnan(tmp_pos))
     init_cov_[2] = tmp_pos;
   else
-    ROS_WARN("ignoring NAN in initial covariance AA");	
+    ROS_WARN("ignoring NAN in initial covariance AA");
 }
 
-void 
+void
 AmclNode::checkLaserReceived(const ros::TimerEvent& event)
 {
   ros::Duration d = ros::Time::now() - last_laser_received_ts_;
@@ -762,7 +774,7 @@ AmclNode::requestMap()
   ROS_INFO("Requesting the map...");
   while(!ros::service::call("static_map", req, resp))
   {
-    ROS_WARN("Request for map failed; trying again...");
+    ROS_WARN_THROTTLE(30, "Request for map failed; trying again...");
     ros::Duration d(0.5);
     d.sleep();
   }
@@ -772,7 +784,7 @@ AmclNode::requestMap()
 void
 AmclNode::mapReceived(const nav_msgs::OccupancyGridConstPtr& msg)
 {
-  if( first_map_only_ && first_map_received_ ) {
+  if( first_map_only_ && first_map_received_ || ! should_run_) {
     return;
   }
 
@@ -816,7 +828,7 @@ AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
 
   pf_->pop_err = pf_err_;
   pf_->pop_z = pf_z_;
-  
+
   if(init_global_){
     pf_init_model(pf_, (pf_init_model_fn_t)AmclNode::uniformPoseGenerator,
 		  (void *)map_);
@@ -852,8 +864,8 @@ AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
   else if(laser_model_type_ == LASER_MODEL_LIKELIHOOD_FIELD_PROB){
     ROS_INFO("Initializing likelihood field model; this can take some time on large maps...");
     laser_->SetModelLikelihoodFieldProb(z_hit_, z_rand_, sigma_hit_,
-					laser_likelihood_max_dist_, 
-					do_beamskip_, beam_skip_distance_, 
+					laser_likelihood_max_dist_,
+					do_beamskip_, beam_skip_distance_,
 					beam_skip_threshold_, beam_skip_error_threshold_);
     ROS_INFO("Done initializing likelihood field model.");
   }
@@ -994,6 +1006,22 @@ AmclNode::uniformPoseGenerator(void* arg)
   return p;
 }
 
+bool AmclNode::localizationStartCallback(std_srvs::Empty::Request& req,
+                               std_srvs::Empty::Response& res)
+{
+    should_run_ = true;
+    ROS_INFO("AMCL started.");
+    return true;
+}
+
+bool AmclNode::localizationStopCallback(std_srvs::Empty::Request& req,
+                                        std_srvs::Empty::Response& res)
+{
+    should_run_ = false;
+    ROS_INFO("AMCL stopped.");
+    return true;
+}
+
 bool
 AmclNode::globalLocalizationCallback(std_srvs::Empty::Request& req,
                                      std_srvs::Empty::Response& res)
@@ -1011,7 +1039,7 @@ AmclNode::globalLocalizationCallback(std_srvs::Empty::Request& req,
 }
 
 // force nomotion updates (amcl updating without requiring motion)
-bool 
+bool
 AmclNode::nomotionUpdateCallback(std_srvs::Empty::Request& req,
                                      std_srvs::Empty::Response& res)
 {
@@ -1034,7 +1062,7 @@ void
 AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
 {
   last_laser_received_ts_ = ros::Time::now();
-  if( map_ == NULL ) {
+  if( map_ == NULL || ! should_run_) {
     return;
   }
   boost::recursive_mutex::scoped_lock lr(configuration_mutex_);
@@ -1112,7 +1140,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     // Set the laser update flags
     if(update)
       for(unsigned int i=0; i < lasers_update_.size(); i++)
-        lasers_update_[i] = true;    
+        lasers_update_[i] = true;
   }
 
   bool force_publication = false;
@@ -1231,7 +1259,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     }
     else{
       pf_update_current_cluster_stats(pf_);
-      //update the mean?? 
+      //update the mean??
       force_publication = true;
     }
 
@@ -1262,7 +1290,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
           z = set->samples[i].weight;
           z_sensor_likelihood = set->samples[i].sensor_likelihood;
         }
-	
+
         tf::poseTFToMsg(tf::Pose(tf::createQuaternionFromYaw(set->samples[i].pose.v[2]),
                                  tf::Vector3(set->samples[i].pose.v[0],
                                  set->samples[i].pose.v[1], z)),
@@ -1272,12 +1300,12 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
                                  set->samples[i].pose.v[1], z_sensor_likelihood)),
                                  cloud_msg_sensor_likelihood.poses[i]);
       }
-      
+
       if(draw_weight_as_height_){
         if(max_weight > 0 && normalize_weight_){
           for(int i=0;i<set->sample_count;i++){
             cloud_msg.poses[i].position.z /= max_weight;
-          }	  
+          }
         }
       }
 
@@ -1407,7 +1435,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
           ROS_INFO("got new initial pose, setting latest_tf_for_odom to latest_tf");
         }
       }
-      
+
       if (tf_broadcast_ == true && !odom_only_)
       {
         // We want to send a transform that is good up until a
@@ -1469,7 +1497,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     }
   }
 
-  if((publish_basic_pose_ && (!publish_basic_pose_on_convergence_ || pf_->converged)) || 
+  if((publish_basic_pose_ && (!publish_basic_pose_on_convergence_ || pf_->converged)) ||
      publish_test_frame_ || draw_laser_points_){
     tf::Pose map_pose;
     if (!odom_only_) {
@@ -1481,7 +1509,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
 
     double yaw,pitch,roll;
     map_pose.getBasis().getEulerYPR(yaw, pitch, roll);
-      
+
     geometry_msgs::PoseStamped p_basic;
     // Fill in the header
     p_basic.header.frame_id = global_frame_id_;
@@ -1495,37 +1523,37 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       pose_basic_pub_.publish(p_basic);
     }
 
-    if(publish_test_frame_){        
-      //looks like some issue with the timestamps here 
+    if(publish_test_frame_){
+      //looks like some issue with the timestamps here
       boost::shared_ptr<tf::Transform> test_base_tf_ptr;
-      tf::Transform test_base_tf(tf::createQuaternionFromYaw(yaw), 
-				 tf::Vector3(map_pose.getOrigin().x(), 
-					     map_pose.getOrigin().y(), 
+      tf::Transform test_base_tf(tf::createQuaternionFromYaw(yaw),
+				 tf::Vector3(map_pose.getOrigin().x(),
+					     map_pose.getOrigin().y(),
 					     0.0));
       test_base_tf_ptr = boost::make_shared<tf::Transform>(test_base_tf);
-      tf::Stamped<tf::Pose> test_base_to_map(*test_base_tf_ptr, 
+      tf::Stamped<tf::Pose> test_base_to_map(*test_base_tf_ptr,
                                              laser_scan->header.stamp,
                                              test_frame_id_);
       ros::Duration test_transform_tolerance_(0.01);
       ros::Time transform_expiration = (laser_scan->header.stamp +
                                         test_transform_tolerance_);
-      tf::StampedTransform test_base_tf_stamped(test_base_to_map, 
+      tf::StampedTransform test_base_tf_stamped(test_base_to_map,
                                                 transform_expiration,
                                                 global_frame_id_, test_frame_id_);
       this->tfb_->sendTransform(test_base_tf_stamped);
       sent_first_transform_ = true;
     }
-    if(draw_laser_points_){ //draw the laser points adjutsed for pose correction 
+    if(draw_laser_points_){ //draw the laser points adjutsed for pose correction
       sensor_msgs::PointCloud cloud;
-      projector_.transformLaserScanToPointCloud(base_frame_id_, *laser_scan, cloud, *tf_, laser_max_range_); 
+      projector_.transformLaserScanToPointCloud(base_frame_id_, *laser_scan, cloud, *tf_, laser_max_range_);
 
-      visualization_msgs::Marker points; 
-      points.id = 100000; 
+      visualization_msgs::Marker points;
+      points.id = 100000;
       points.header.frame_id = "map";
       points.header.stamp = laser_scan->header.stamp;
       points.action = visualization_msgs::Marker::DELETE;
       //
-      std::string p_name = ros::this_node::getName() + std::string("_scans"); 
+      std::string p_name = ros::this_node::getName() + std::string("_scans");
       points.ns = p_name;
       points.type = visualization_msgs::Marker::POINTS;
       points.scale.x = 0.05;
@@ -1535,30 +1563,30 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       points.color.g = l_colors_[1];
       points.color.b = l_colors_[2];
       points.color.a = 1.0;
-        
+
       marker_pub_.publish(points);
 
       points.action = visualization_msgs::Marker::ADD;
 
-      tf::Quaternion quat = tf::createQuaternionFromYaw(yaw); 
-        
-      points.pose.position.x = map_pose.getOrigin().x(); 
+      tf::Quaternion quat = tf::createQuaternionFromYaw(yaw);
+
+      points.pose.position.x = map_pose.getOrigin().x();
       points.pose.position.y = map_pose.getOrigin().y();
       points.pose.position.z = 0;
       points.pose.orientation.x = quat.x();
       points.pose.orientation.y = quat.y();
       points.pose.orientation.z = quat.z();
       points.pose.orientation.w = quat.w();
-        
+
       for(int i=0; i < cloud.points.size(); i++){
         geometry_msgs::Point p;
-        p.x = cloud.points[i].x; 
-        p.y = cloud.points[i].y; 
+        p.x = cloud.points[i].x;
+        p.y = cloud.points[i].y;
         p.z = 0;
         points.points.push_back(p);
       }
       marker_pub_.publish(points);
-    }        
+    }
   }
 }
 
@@ -1778,7 +1806,7 @@ AmclNode::handleInitialPoseMessage(const geometry_msgs::PoseWithCovarianceStampe
   if(odom_only_) {
     new_initial_pose_received_ = true;
   }
-  
+
   // Re-initialize the filter
   pf_vector_t pf_init_pose_mean = pf_vector_zero();
   pf_init_pose_mean.v[0] = pose_new.getOrigin().x();
@@ -1813,10 +1841,10 @@ AmclNode::applyInitialPose()
   boost::recursive_mutex::scoped_lock cfl(configuration_mutex_);
   if( initial_pose_hyp_ != NULL && map_ != NULL ) {
     if(use_cov_from_params_){
-      //override the cov params 
+      //override the cov params
       for(int i=0; i < 3; i++){
       	for(int j=0; j < 3; j++){
-      	  initial_pose_hyp_->pf_pose_cov.m[i][j] = 0; 
+      	  initial_pose_hyp_->pf_pose_cov.m[i][j] = 0;
         }
       }
       initial_pose_hyp_->pf_pose_cov.m[0][0] = std_xx_;
@@ -1824,11 +1852,11 @@ AmclNode::applyInitialPose()
       initial_pose_hyp_->pf_pose_cov.m[2][2] = std_tt_;
     }
     else{
-      printf("Using std_xx of %.3f, std_yy of %.3f, std_tt of %.3f from initialpose msg", 
+      printf("Using std_xx of %.3f, std_yy of %.3f, std_tt of %.3f from initialpose msg",
              initial_pose_hyp_->pf_pose_cov.m[0][0], initial_pose_hyp_->pf_pose_cov.m[1][1],
              initial_pose_hyp_->pf_pose_cov.m[2][2]);
     }
-        
+
     pf_init(pf_, initial_pose_hyp_->pf_pose_mean, initial_pose_hyp_->pf_pose_cov);
     pf_init_ = false;
 
