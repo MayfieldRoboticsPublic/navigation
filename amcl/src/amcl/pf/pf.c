@@ -190,7 +190,7 @@ void pf_init_with_hypotheses(pf_t *pf, pf_vector_t * hyps, pf_matrix_t * covs, i
 
   set->sample_count = num_samples_per_particle * num_guesses;
 
-  if(set->sample_count >= pf->max_samples)
+  if(set->sample_count > pf->max_samples)
   {
     set->sample_count = pf->max_samples;
   }
