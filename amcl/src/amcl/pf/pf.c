@@ -185,9 +185,15 @@ void pf_init_with_hypotheses(pf_t *pf, pf_vector_t * hyps, pf_matrix_t * covs, i
 
   pf_kdtree_clear(set->kdtree);
 
-  set->sample_count = pf->max_samples;
 
   num_samples_per_particle =set->sample_count/num_guesses;
+
+  set->sample_count = num_samples_per_particle * num_guesses;
+
+  if(set->sample_count >= pf->max_samples)
+  {
+    set->sample_count = pf->max_samples;
+  }
 
   for(p_i = 0; p_i < num_guesses; p_i++)
   {
