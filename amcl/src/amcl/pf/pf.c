@@ -187,6 +187,10 @@ void pf_init_with_hypotheses(pf_t *pf, pf_vector_t * hyps, pf_matrix_t * covs, i
 
   num_samples_per_particle = pf->max_samples/num_guesses;
 
+  // If too many hypotheses are passed to amcl return
+  if (num_samples_per_particle == 0)
+      return;
+
   set->sample_count = num_samples_per_particle * num_guesses;
 
   for(p_i = 0; p_i < num_guesses; p_i++)
