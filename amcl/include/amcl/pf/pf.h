@@ -63,6 +63,9 @@ typedef struct
 
   // Weight for this pose
   double weight;
+
+  // Last sensor update likelihood for this pose
+  double sensor_likelihood;
   
 } pf_sample_t;
 
