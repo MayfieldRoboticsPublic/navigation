@@ -100,7 +100,10 @@ AMCLLaser::SetModelLikelihoodFieldProb(double z_hit,
 				       bool do_beamskip,
 				       double beam_skip_distance,
 				       double beam_skip_threshold, 
-				       double beam_skip_error_threshold)
+				       double beam_skip_error_threshold,
+				       bool penalize_unknown,
+				       int unknown_radius,
+				       double unknown_threshold)
 {
   this->model_type = LASER_MODEL_LIKELIHOOD_FIELD_PROB;
   this->z_hit = z_hit;
@@ -110,6 +113,9 @@ AMCLLaser::SetModelLikelihoodFieldProb(double z_hit,
   this->beam_skip_distance = beam_skip_distance;
   this->beam_skip_threshold = beam_skip_threshold;
   this->beam_skip_error_threshold = beam_skip_error_threshold;
+  this->penalize_unknown = penalize_unknown;
+  this->unknown_radius = unknown_radius;
+  this->unknown_threshold = unknown_threshold;
   map_update_cspace(this->map, max_occ_dist);
 }
 
@@ -208,6 +214,53 @@ double AMCLLaser::BeamModel(AMCLLaserData *data, pf_sample_set_t* set)
   return(total_weight);
 }
 
+
+double frac_unknown_area(const map_t *map, pf_vector_t pose, int radius)
+{
+    int robot_mi, robot_mj, num_unknown;
+    int side = radius * 2 + 1;
+    int area = side * side;
+
+    robot_mi = MAP_GXWX(map, pose.v[0]);
+    robot_mj = MAP_GYWY(map, pose.v[1]);
+
+    // Check square around robot pose for unknown pixels, if we're on the edge
+    // of the map, count non-existent pixels also as unknowns.
+    num_unknown = 0;
+    for (int i = robot_mi - radius; i <= robot_mi + radius; i++)
+    {
+        for (int j = robot_mj - radius; j <= robot_mj + radius; j++)
+        {
+            if (MAP_VALID(map, i, j))
+            {
+                if (map->cells[MAP_INDEX(map, i, j)].occ_state == 0)
+                    num_unknown += 1;
+            }
+            else
+                num_unknown += 1;
+        }
+    }
+
+    return (double) num_unknown / (double) area;
+}
+
+
+double AMCLLaser::unknownPenalty(const map_t *map, pf_vector_t pose)
+{
+    double in_unknown_penalty = 1.0;
+
+    if (penalize_unknown)
+    {
+        double frac_unknown = frac_unknown_area(
+                map, pose, unknown_radius);
+        if (frac_unknown > unknown_threshold)
+            in_unknown_penalty = 1 - frac_unknown;
+    }
+
+    return in_unknown_penalty;
+}
+
+
 double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set)
 {
   AMCLLaser *self;
@@ -285,7 +338,6 @@ double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set
       // TODO: outlier rejection for short readings
 
       //*******No outlier rejection (bad for changed maps) (Carmen localizer has outlier rejection) 
-
       assert(pz <= 1.0);
       assert(pz >= 0.0);
       //      p *= pz;
@@ -293,9 +345,9 @@ double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set
       // works well, though...
       p += pz*pz*pz;
     }
-    
-    sample->weight *= p;
 
+    double in_unknown_penalty =  self->unknownPenalty(self->map, sample->pose);
+    sample->weight *= p * in_unknown_penalty;
     total_weight += sample->weight;
   }
 
@@ -482,8 +534,8 @@ double AMCLLaser::LikelihoodFieldModelProb(AMCLLaserData *data, pf_sample_set_t*
         }
       }
 
-      sample->weight *= exp(log_p);
-
+      double in_unknown_penalty = self->unknownPenalty(self->map, sample->pose);
+      sample->weight *= exp(log_p) * in_unknown_penalty;
       total_weight += sample->weight;
     }
   }

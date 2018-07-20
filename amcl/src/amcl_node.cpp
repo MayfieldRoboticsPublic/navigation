@@ -290,6 +290,10 @@ class AmclNode
     laser_model_t laser_model_type_;
     bool tf_broadcast_;
 
+    bool penalize_unknown_;
+    int unknown_radius_;
+    double unknown_threshold_;
+
     void reconfigureCB(amcl::AMCLConfig &config, uint32_t level);
 
     ros::Time last_laser_received_ts_;
@@ -386,6 +390,10 @@ AmclNode::AmclNode() :
   private_nh_.param("odom_alpha4", alpha4_, 0.2);
   private_nh_.param("odom_alpha5", alpha5_, 0.2);
   private_nh_.param("stuck_prob", stuck_prob_, 0.0);
+
+  private_nh_.param("penalize_unknown", penalize_unknown_, false);
+  private_nh_.param("unknown_radius", unknown_radius_, 4);
+  private_nh_.param("unknown_threshold", unknown_threshold_, 0.6);
 
   private_nh_.param("do_beamskip", do_beamskip_, false);
   private_nh_.param("beam_skip_distance", beam_skip_distance_, 0.5);
@@ -604,6 +612,10 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
   alpha_fast_ = config.recovery_alpha_fast;
   tf_broadcast_ = config.tf_broadcast;
 
+  penalize_unknown_ = config.penalize_unknown;
+  unknown_radius_ = config.unknown_radius;
+  unknown_threshold_ = config.unknown_threshold;
+
   do_beamskip_= config.do_beamskip;
   beam_skip_distance_ = config.beam_skip_distance;
   beam_skip_threshold_ = config.beam_skip_threshold;
@@ -671,7 +683,8 @@ void AmclNode::initializeLaserModel()
     laser_->SetModelLikelihoodFieldProb(z_hit_, z_rand_, sigma_hit_,
           laser_likelihood_max_dist_,
           do_beamskip_, beam_skip_distance_,
-          beam_skip_threshold_, beam_skip_error_threshold_);
+          beam_skip_threshold_, beam_skip_error_threshold_,
+          penalize_unknown_, unknown_radius_, unknown_threshold_);
     ROS_INFO("Done initializing likelihood field model with probabilities.");
   }
   else if(laser_model_type_ == LASER_MODEL_LIKELIHOOD_FIELD){
@@ -861,7 +874,8 @@ AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
     laser_->SetModelLikelihoodFieldProb(z_hit_, z_rand_, sigma_hit_,
 					laser_likelihood_max_dist_,
 					do_beamskip_, beam_skip_distance_,
-					beam_skip_threshold_, beam_skip_error_threshold_);
+					beam_skip_threshold_, beam_skip_error_threshold_,
+					penalize_unknown_, unknown_radius_, unknown_threshold_);
     ROS_INFO("Done initializing likelihood field model.");
   }
   else
@@ -915,10 +929,15 @@ AmclNode::convertMap( const nav_msgs::OccupancyGrid& map_msg )
   ROS_ASSERT(map->cells);
   for(int i=0;i<map->size_x * map->size_y;i++)
   {
+    // FREE
     if(map_msg.data[i] == 0)
       map->cells[i].occ_state = -1;
+
+    // OCCUPIED
     else if(map_msg.data[i] == 100)
       map->cells[i].occ_state = +1;
+
+    // UNKNOWN
     else
       map->cells[i].occ_state = 0;
   }

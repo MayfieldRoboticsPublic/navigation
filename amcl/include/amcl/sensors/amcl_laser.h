@@ -85,7 +85,10 @@ class AMCLLaser : public AMCLSensor
 					   bool do_beamskip, 
 					   double beam_skip_distance, 
 					   double beam_skip_threshold, 
-					   double beam_skip_error_threshold);
+					   double beam_skip_error_threshold,
+					   bool penalize_unknown,
+					   int unknown_radius,
+					   double unknown_threshold);
 
   // Update the filter based on the sensor model.  Returns true if the
   // filter has been updated.
@@ -98,6 +101,9 @@ class AMCLLaser : public AMCLSensor
   // Determine the probability for the given pose
   private: static double BeamModel(AMCLLaserData *data, 
                                    pf_sample_set_t* set);
+
+  private: double unknownPenalty(const map_t *map, pf_vector_t pose);
+
   // Determine the probability for the given pose
   private: static double LikelihoodFieldModel(AMCLLaserData *data, 
                                               pf_sample_set_t* set);
@@ -121,6 +127,11 @@ class AMCLLaser : public AMCLSensor
   
   // Max beams to consider
   private: int max_beams;
+
+  // Penalize particles in unknown space parameters
+  private: bool penalize_unknown;
+  private: int unknown_radius;
+  private: double unknown_threshold;
 
   // Beam skipping parameters (used by LikelihoodFieldModelProb model)
   private: bool do_beamskip; 
