@@ -253,7 +253,7 @@ double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set
 
   total_weight = 0.0;
 
-  int num_sample_with_unknown = 0;
+  int num_samples_with_unknown = 0;
 
   // Compute the sample weights
   for (j = 0; j < set->sample_count; j++)
@@ -326,14 +326,14 @@ double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set
 
     sample->weight *= p * (1 - frac_unknown_area(self->map, pose, 4));
     if (frac_unknown_area(self->map, pose, 4) > .5)
-        num_sample_with_unknown += 1;
+        num_samples_with_unknown += 1;
 
     total_weight += sample->weight;
   }
 
-  if (num_sample_with_unknown > 0)
+  if (num_samples_with_unknown > 0)
   {
-      fprintf(stderr, "num samples in unknown %d\n", num_sample_with_unknown);
+      fprintf(stderr, "num samples in unknown %d\n", num_samples_with_unknown);
   }
   return(total_weight);
 }
