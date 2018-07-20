@@ -208,6 +208,35 @@ double AMCLLaser::BeamModel(AMCLLaserData *data, pf_sample_set_t* set)
   return(total_weight);
 }
 
+
+double frac_unknown_area(map_t *map, pf_vector_t pose, int radius)
+{
+    int robot_mi, robot_mj, num_unknown;
+    int area = (radius + 1) * (radius + 1);
+
+    robot_mi = MAP_GXWX(map, pose.v[0]);
+    robot_mj = MAP_GYWY(map, pose.v[1]);
+
+    // Check square around robot pose for unknown pixels, if we're on the edge
+    // of the map, count non-existent pixels also as unknowns.
+    for (int i = robot_mi - radius; i <= robot_mi + radius; i++)
+    {
+        for (int j = robot_mj - radius; j <= robot_mj + radius; j++)
+        {
+            if (MAP_VALID(map, i, j))
+            {
+                if (map->cells[MAP_INDEX(map, robot_mi, robot_mj)] == 0)
+                    num_unknown += 1;
+            }
+            else
+                num_unknown += 1;
+        }
+    }
+
+    return (double) num_unknown / (double) area;
+}
+
+
 double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set)
 {
   AMCLLaser *self;
@@ -223,6 +252,8 @@ double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set
   self = (AMCLLaser*) data->sensor;
 
   total_weight = 0.0;
+
+  int num_sample_with_unknown = 0;
 
   // Compute the sample weights
   for (j = 0; j < set->sample_count; j++)
@@ -285,7 +316,6 @@ double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set
       // TODO: outlier rejection for short readings
 
       //*******No outlier rejection (bad for changed maps) (Carmen localizer has outlier rejection) 
-
       assert(pz <= 1.0);
       assert(pz >= 0.0);
       //      p *= pz;
@@ -293,12 +323,18 @@ double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set
       // works well, though...
       p += pz*pz*pz;
     }
-    
-    sample->weight *= p;
+
+    sample->weight *= p * (1 - frac_unknown_area(self->map, pose, 4));
+    if (frac_unknown_area(self->map, pose, 4) > .5)
+        num_sample_with_unknown += 1;
 
     total_weight += sample->weight;
   }
 
+  if (num_sample_with_unknown > 0)
+  {
+      fprintf(stderr, "num samples in unknown %d\n", num_sample_with_unknown);
+  }
   return(total_weight);
 }
 

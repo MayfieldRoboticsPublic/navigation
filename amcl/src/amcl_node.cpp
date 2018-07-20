@@ -915,10 +915,15 @@ AmclNode::convertMap( const nav_msgs::OccupancyGrid& map_msg )
   ROS_ASSERT(map->cells);
   for(int i=0;i<map->size_x * map->size_y;i++)
   {
+    // FREE
     if(map_msg.data[i] == 0)
       map->cells[i].occ_state = -1;
+
+    // OCCUPIED
     else if(map_msg.data[i] == 100)
       map->cells[i].occ_state = +1;
+
+    // UNKNOWN
     else
       map->cells[i].occ_state = 0;
   }
