@@ -85,7 +85,8 @@ AMCLLaser::SetModelLikelihoodField(double z_hit,
                                    double max_occ_dist,
                                    bool penalize_unknown,
                                    int unknown_radius,
-                                   double unknown_threshold)
+                                   double unknown_threshold,
+                                   double unknown_min_penalty)
 {
   this->model_type = LASER_MODEL_LIKELIHOOD_FIELD;
   this->z_hit = z_hit;
@@ -94,6 +95,7 @@ AMCLLaser::SetModelLikelihoodField(double z_hit,
   this->penalize_unknown = penalize_unknown;
   this->unknown_radius = unknown_radius;
   this->unknown_threshold = unknown_threshold;
+  this->unknown_min_penalty = unknown_min_penalty;
 
   map_update_cspace(this->map, max_occ_dist);
 }
@@ -109,7 +111,8 @@ AMCLLaser::SetModelLikelihoodFieldProb(double z_hit,
 				       double beam_skip_error_threshold,
 				       bool penalize_unknown,
 				       int unknown_radius,
-				       double unknown_threshold)
+				       double unknown_threshold,
+                       double unknown_min_penalty)
 {
   this->model_type = LASER_MODEL_LIKELIHOOD_FIELD_PROB;
   this->z_hit = z_hit;
@@ -122,6 +125,7 @@ AMCLLaser::SetModelLikelihoodFieldProb(double z_hit,
   this->penalize_unknown = penalize_unknown;
   this->unknown_radius = unknown_radius;
   this->unknown_threshold = unknown_threshold;
+  this->unknown_min_penalty = unknown_min_penalty;
   map_update_cspace(this->map, max_occ_dist);
 }
 
@@ -255,14 +259,15 @@ double AMCLLaser::unknownPenalty(const map_t *map, pf_vector_t pose)
 {
     double in_unknown_penalty = 1.0;
 
-    double unknown_min_penalty = .2;
     if (this->penalize_unknown)
     {
         double frac_unknown = frac_unknown_area(
                 map, pose, this->unknown_radius);
         if (frac_unknown > this->unknown_threshold)
+        {
             in_unknown_penalty = fmax(
-                    1 - frac_unknown, unknown_min_penalty);
+                    1 - frac_unknown, this->unknown_min_penalty);
+        }
     }
 
     return in_unknown_penalty;

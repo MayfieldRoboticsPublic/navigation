@@ -78,7 +78,8 @@ class AMCLLaser : public AMCLSensor
                                        double max_occ_dist,
                                        bool penalize_unknown,
                                        int unknown_radius,
-                                       double unknown_threshold);
+                                       double unknown_threshold,
+                                       double unknown_min_penalty);
 
   //a more probabilistically correct model - also with the option to do beam skipping
   public: void SetModelLikelihoodFieldProb(double z_hit,
@@ -91,7 +92,8 @@ class AMCLLaser : public AMCLSensor
 					   double beam_skip_error_threshold,
 					   bool penalize_unknown,
 					   int unknown_radius,
-					   double unknown_threshold);
+					   double unknown_threshold,
+					   double unknown_min_penalty);
 
   // Update the filter based on the sensor model.  Returns true if the
   // filter has been updated.
@@ -135,6 +137,7 @@ class AMCLLaser : public AMCLSensor
   private: bool penalize_unknown;
   private: int unknown_radius;
   private: double unknown_threshold;
+  private: double unknown_min_penalty;
 
   // Beam skipping parameters (used by LikelihoodFieldModelProb model)
   private: bool do_beamskip; 

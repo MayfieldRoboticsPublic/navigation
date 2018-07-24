@@ -293,6 +293,7 @@ class AmclNode
     bool penalize_unknown_;
     int unknown_radius_;
     double unknown_threshold_;
+    double unknown_min_penalty_;
 
     void reconfigureCB(amcl::AMCLConfig &config, uint32_t level);
 
@@ -394,6 +395,7 @@ AmclNode::AmclNode() :
   private_nh_.param("penalize_unknown", penalize_unknown_, false);
   private_nh_.param("unknown_radius", unknown_radius_, 4);
   private_nh_.param("unknown_threshold", unknown_threshold_, 0.6);
+  private_nh_.param("unknown_min_penalty", unknown_min_penalty_, 0.2);
 
   private_nh_.param("do_beamskip", do_beamskip_, false);
   private_nh_.param("beam_skip_distance", beam_skip_distance_, 0.5);
@@ -615,6 +617,7 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
   penalize_unknown_ = config.penalize_unknown;
   unknown_radius_ = config.unknown_radius;
   unknown_threshold_ = config.unknown_threshold;
+  unknown_min_penalty_ = config.unknown_min_penalty;
 
   do_beamskip_= config.do_beamskip;
   beam_skip_distance_ = config.beam_skip_distance;
@@ -684,7 +687,8 @@ void AmclNode::initializeLaserModel()
           laser_likelihood_max_dist_,
           do_beamskip_, beam_skip_distance_,
           beam_skip_threshold_, beam_skip_error_threshold_,
-          penalize_unknown_, unknown_radius_, unknown_threshold_);
+          penalize_unknown_, unknown_radius_, unknown_threshold_,
+          unknown_min_penalty_);
     ROS_INFO("Done initializing likelihood field model with probabilities.");
   }
   else if(laser_model_type_ == LASER_MODEL_LIKELIHOOD_FIELD){
@@ -693,7 +697,8 @@ void AmclNode::initializeLaserModel()
                                     laser_likelihood_max_dist_,
                                     penalize_unknown_,
                                     unknown_radius_,
-                                    unknown_threshold_);
+                                    unknown_threshold_,
+                                    unknown_min_penalty_);
     ROS_INFO("Done initializing likelihood field model.");
   }
 }
@@ -878,7 +883,8 @@ AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
 					laser_likelihood_max_dist_,
 					do_beamskip_, beam_skip_distance_,
 					beam_skip_threshold_, beam_skip_error_threshold_,
-					penalize_unknown_, unknown_radius_, unknown_threshold_);
+					penalize_unknown_, unknown_radius_, unknown_threshold_,
+					unknown_min_penalty_);
     ROS_INFO("Done initializing likelihood field model.");
   }
   else
@@ -888,7 +894,8 @@ AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
                                     laser_likelihood_max_dist_,
                                     penalize_unknown_,
                                     unknown_radius_,
-                                    unknown_threshold_);
+                                    unknown_threshold_,
+                                    unknown_min_penalty_);
     ROS_INFO("Done initializing likelihood field model.");
   }
 
