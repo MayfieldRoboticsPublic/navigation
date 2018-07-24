@@ -75,7 +75,10 @@ class AMCLLaser : public AMCLSensor
   public: void SetModelLikelihoodField(double z_hit,
                                        double z_rand,
                                        double sigma_hit,
-                                       double max_occ_dist);
+                                       double max_occ_dist,
+                                       bool penalize_unknown,
+                                       int unknown_radius,
+                                       double unknown_threshold);
 
   //a more probabilistically correct model - also with the option to do beam skipping
   public: void SetModelLikelihoodFieldProb(double z_hit,

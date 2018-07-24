@@ -82,12 +82,18 @@ void
 AMCLLaser::SetModelLikelihoodField(double z_hit,
                                    double z_rand,
                                    double sigma_hit,
-                                   double max_occ_dist)
+                                   double max_occ_dist,
+                                   bool penalize_unknown,
+                                   int unknown_radius,
+                                   double unknown_threshold)
 {
   this->model_type = LASER_MODEL_LIKELIHOOD_FIELD;
   this->z_hit = z_hit;
   this->z_rand = z_rand;
   this->sigma_hit = sigma_hit;
+  this->penalize_unknown = penalize_unknown;
+  this->unknown_radius = unknown_radius;
+  this->unknown_threshold = unknown_threshold;
 
   map_update_cspace(this->map, max_occ_dist);
 }
@@ -249,12 +255,14 @@ double AMCLLaser::unknownPenalty(const map_t *map, pf_vector_t pose)
 {
     double in_unknown_penalty = 1.0;
 
-    if (penalize_unknown)
+    double unknown_min_penalty = .2;
+    if (this->penalize_unknown)
     {
         double frac_unknown = frac_unknown_area(
-                map, pose, unknown_radius);
-        if (frac_unknown > unknown_threshold)
-            in_unknown_penalty = 1 - frac_unknown;
+                map, pose, this->unknown_radius);
+        if (frac_unknown > this->unknown_threshold)
+            in_unknown_penalty = fmax(
+                    1 - frac_unknown, unknown_min_penalty);
     }
 
     return in_unknown_penalty;

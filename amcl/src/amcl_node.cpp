@@ -690,7 +690,10 @@ void AmclNode::initializeLaserModel()
   else if(laser_model_type_ == LASER_MODEL_LIKELIHOOD_FIELD){
     ROS_INFO("Initializing likelihood field model; this can take some time on large maps...");
     laser_->SetModelLikelihoodField(z_hit_, z_rand_, sigma_hit_,
-                                    laser_likelihood_max_dist_);
+                                    laser_likelihood_max_dist_,
+                                    penalize_unknown_,
+                                    unknown_radius_,
+                                    unknown_threshold_);
     ROS_INFO("Done initializing likelihood field model.");
   }
 }
@@ -882,7 +885,10 @@ AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
   {
     ROS_INFO("Initializing likelihood field model; this can take some time on large maps...");
     laser_->SetModelLikelihoodField(z_hit_, z_rand_, sigma_hit_,
-                                    laser_likelihood_max_dist_);
+                                    laser_likelihood_max_dist_,
+                                    penalize_unknown_,
+                                    unknown_radius_,
+                                    unknown_threshold_);
     ROS_INFO("Done initializing likelihood field model.");
   }
 
